@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { Heart, Camera, Image as ImageIcon, Loader2, Plus, Sparkles, Trash2, Clock, Calendar } from 'lucide-react';
-import { collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { db } from './firebase';
 
 // --- CONFIGURACIÓN DE CLOUDINARY ---
@@ -19,14 +19,13 @@ const App = () => {
   const [timeTogether, setTimeTogether] = useState({ years: 0, months: 0, days: 0 });
   const [noPosition, setNoPosition] = useState({ x: 0, y: 0 });
   
-  // --- ESTADOS DE LA RULETA Y EL HISTORIAL ---
-  const [opcionesRuleta, setOpcionesRuleta] = useState(["Ir al cine", "Cena romántica", "Paseo nocturno", "Helados", "Quedarnos en casa"]);
+  // --- ESTADOS DE LA RULETA (CONECTADOS A FIREBASE) ---
+  const [opcionesRuleta, setOpcionesRuleta] = useState([]);
   const [nuevaOpcion, setNuevaOpcion] = useState('');
   const [ruletaGirando, setRuletaGirando] = useState(false);
   const [citaElegida, setCitaElegida] = useState('');
   const [gradosRuleta, setGradosRuleta] = useState(0);
   
-  // Estados para Firebase
   const [fotosAlbum, setFotosAlbum] = useState([]);
   const [historialCitas, setHistorialCitas] = useState([]);
   const [subiendo, setSubiendo] = useState(false);
@@ -49,41 +48,66 @@ const App = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Sincronizar Álbum y Historial de Citas desde Firebase en tiempo real
+  // Sincronizar Álbum, Historial y Opciones de Ruleta desde Firebase en tiempo real
   useEffect(() => {
-    // 1. Cargar álbum
+    // 1. Álbum
     const qAlbum = query(collection(db, 'album_citas'), orderBy('fecha', 'desc'));
     const unsubAlbum = onSnapshot(qAlbum, (snapshot) => {
       setFotosAlbum(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    // 2. Cargar historial de citas
+    // 2. Historial de citas sorteadas
     const qHistorial = query(collection(db, 'historial_citas'), orderBy('fecha', 'desc'));
     const unsubHistorial = onSnapshot(qHistorial, (snapshot) => {
       setHistorialCitas(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
+    // 3. Opciones de la Ruleta (Sincronizadas en la nube)
+    const qRuleta = query(collection(db, 'ruleta_opciones'), orderBy('fecha', 'asc'));
+    const unsubRuleta = onSnapshot(qRuleta, async (snapshot) => {
+      const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      if (fetched.length === 0) {
+        // Opciones por defecto si la base de datos está vacía
+        const iniciales = ["Ir al cine", "Cena romántica", "Paseo nocturno", "Helados", "Quedarnos en casa"];
+        for (const texto of iniciales) {
+          await addDoc(collection(db, 'ruleta_opciones'), { texto, fecha: new Date().toISOString() });
+        }
+      } else {
+        setOpcionesRuleta(fetched);
+      }
+    });
+
     return () => {
       unsubAlbum();
       unsubHistorial();
+      unsubRuleta();
     };
   }, []);
 
   const moveNoButton = () => setNoPosition({ x: (Math.random() * 150) - 75, y: (Math.random() * 150) - 75 });
   const handleSiClick = () => confetti({ particleCount: 300, spread: 100, origin: { y: 0.6 }, colors: ['#8B3A3A', '#D4AF37', '#5C1D24'] });
   
-  // --- LÓGICA DE LA RULETA ---
-  const agregarOpcionRuleta = () => {
+  // --- LÓGICA DE LA RULETA EN FIREBASE ---
+  const agregarOpcionRuleta = async () => {
     if (nuevaOpcion.trim() !== '') {
-      setOpcionesRuleta([...opcionesRuleta, nuevaOpcion]);
-      setNuevaOpcion('');
+      try {
+        await addDoc(collection(db, 'ruleta_opciones'), {
+          texto: nuevaOpcion.trim(),
+          fecha: new Date().toISOString()
+        });
+        setNuevaOpcion('');
+      } catch (error) {
+        console.error("Error al agregar opción:", error);
+      }
     }
   };
 
-  const eliminarOpcion = (index) => {
-    const nuevas = [...opcionesRuleta];
-    nuevas.splice(index, 1);
-    setOpcionesRuleta(nuevas);
+  const eliminarOpcion = async (id) => {
+    try {
+      await deleteDoc(doc(db, 'ruleta_opciones', id));
+    } catch (error) {
+      console.error("Error al eliminar opción:", error);
+    }
   };
 
   const girarRuleta = async () => {
@@ -101,27 +125,26 @@ const App = () => {
       const anguloPorOpcion = 360 / opcionesRuleta.length;
       const gradosNormalizados = (360 - (rotacionTotal % 360)) % 360;
       const indiceGanador = Math.floor(gradosNormalizados / anguloPorOpcion);
-      const seleccion = opcionesRuleta[indiceGanador];
+      const seleccion = opcionesRuleta[indiceGanador].texto;
       
       setCitaElegida(seleccion);
       setRuletaGirando(false);
       confetti({ particleCount: 150, spread: 70, colors: ['#8B3A3A', '#D4AF37'] });
 
-      // Guardar automáticamente la cita ganadora en Firestore
+      // Guardar en el historial de Firestore
       try {
         await addDoc(collection(db, 'historial_citas'), {
           titulo: seleccion,
           fecha: new Date().toISOString()
         });
       } catch (error) {
-        console.error("Error al guardar cita en historial:", error);
+        console.error("Error al guardar historial:", error);
       }
     }, 4000);
   };
 
-  // Paleta elegante: Tonos Vino, Borgoña y acentos dorados
   const coloresRuleta = ['#5C1D24', '#7A2E36', '#8B3A3A', '#A34848', '#B85C5C'];
-  const anguloPorSlice = 360 / opcionesRuleta.length;
+  const anguloPorSlice = opcionesRuleta.length > 0 ? 360 / opcionesRuleta.length : 360;
   const backgroundRuleta = opcionesRuleta.length > 0 
     ? `conic-gradient(${opcionesRuleta.map((_, i) => `${coloresRuleta[i % coloresRuleta.length]} ${i * anguloPorSlice}deg ${(i + 1) * anguloPorSlice}deg`).join(', ')})`
     : '#e5e7eb';
@@ -170,20 +193,18 @@ const App = () => {
           </div>
         </FadeInSection>
 
-        {/* SECCIÓN 2: RULETA PROFESIONAL E HISTORIAL */}
+        {/* SECCIÓN 2: RULETA Y OPCIONES SINCRONIZADAS */}
         <FadeInSection>
           <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xl p-6 sm:p-8 text-center border border-[#8B3A3A]/20">
             <h2 className="text-3xl font-extrabold text-[#5C1D24] mb-2 font-serif">Nuestra Ruleta</h2>
-            <p className="text-sm text-stone-500 mb-8">Agrega las opciones y deja que el destino decida.</p>
+            <p className="text-sm text-stone-500 mb-8">Agrega o elimina opciones en tiempo real.</p>
             
             {/* Ruleta Visual Circular */}
             <div className="relative w-64 h-64 mx-auto mb-10">
-              {/* Puntero Superior */}
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-20">
                 <div className="w-0 h-0 border-l-[15px] border-r-[15px] border-t-[25px] border-l-transparent border-r-transparent border-t-[#5C1D24] drop-shadow-lg"></div>
               </div>
               
-              {/* Círculo de Slices */}
               <div 
                 className="w-full h-full rounded-full border-4 border-[#F3ECE1] shadow-2xl overflow-hidden relative"
                 style={{ background: backgroundRuleta, transform: `rotate(${gradosRuleta}deg)`, transition: ruletaGirando ? 'transform 4s cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none' }}
@@ -191,15 +212,14 @@ const App = () => {
                 {opcionesRuleta.map((opcion, i) => {
                   const rotacionTexto = (i * anguloPorSlice) + (anguloPorSlice / 2);
                   return (
-                    <div key={i} className="absolute top-1/2 left-1/2 w-[50%] h-0 origin-left flex items-center justify-start pointer-events-none"
+                    <div key={opcion.id} className="absolute top-1/2 left-1/2 w-[50%] h-0 origin-left flex items-center justify-start pointer-events-none"
                          style={{ transform: `translateY(-50%) rotate(${rotacionTexto - 90}deg)` }}>
                       <span className="ml-4 text-white font-bold drop-shadow-md text-sm truncate max-w-[80px]">
-                        {opcion}
+                        {opcion.texto}
                       </span>
                     </div>
                   );
                 })}
-                {/* Centro de la ruleta */}
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 bg-white rounded-full shadow-inner border-4 border-[#8B3A3A]/30 z-10 flex items-center justify-center">
                   <Sparkles className="w-5 h-5 text-[#8B3A3A]" />
                 </div>
@@ -214,9 +234,9 @@ const App = () => {
               </div>
               
               <div className="flex flex-wrap gap-2 justify-center mt-4">
-                {opcionesRuleta.map((opc, i) => (
-                  <span key={i} className="bg-[#F3ECE1] text-[#5C1D24] text-xs py-1 px-3 rounded-full border border-[#8B3A3A]/20 flex items-center gap-1 font-medium">
-                    {opc} <button onClick={() => eliminarOpcion(i)} className="text-stone-400 hover:text-[#8B3A3A]"><Trash2 className="w-3 h-3" /></button>
+                {opcionesRuleta.map((opc) => (
+                  <span key={opc.id} className="bg-[#F3ECE1] text-[#5C1D24] text-xs py-1 px-3 rounded-full border border-[#8B3A3A]/20 flex items-center gap-1 font-medium">
+                    {opc.texto} <button onClick={() => eliminarOpcion(opc.id)} className="text-stone-400 hover:text-[#8B3A3A]"><Trash2 className="w-3 h-3" /></button>
                   </span>
                 ))}
               </div>
@@ -232,7 +252,7 @@ const App = () => {
               {ruletaGirando ? 'GIRANDO...' : 'GIRAR RULETA'}
             </button>
 
-            {/* --- NUEVO: HISTORIAL DE CITAS GUARDADO EN FIREBASE --- */}
+            {/* Historial de Citas */}
             <div className="mt-10 pt-6 border-t border-stone-200 text-left">
               <h3 className="text-lg font-bold text-[#5C1D24] mb-3 flex items-center gap-2 font-serif">
                 <Clock className="w-5 h-5 text-[#8B3A3A]" /> Historial de Citas Elegidas
