@@ -19,8 +19,8 @@ const App = () => {
   const [timeTogether, setTimeTogether] = useState({ years: 0, months: 0, days: 0 });
   const [noPosition, setNoPosition] = useState({ x: 0, y: 0 });
   
-  // --- ESTADOS DE LA RULETA (CONECTADOS A FIREBASE) ---
-  const [opcionesRuleta, setOpcionesRuleta] = useState([]);
+  // --- ESTADOS DE LA RULETA SINCRONIZADOS ---
+  const [opcionesRuleta, setOpcionesRuleta] = useState([]); // [{id, texto}]
   const [nuevaOpcion, setNuevaOpcion] = useState('');
   const [ruletaGirando, setRuletaGirando] = useState(false);
   const [citaElegida, setCitaElegida] = useState('');
@@ -48,26 +48,25 @@ const App = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Sincronizar Álbum, Historial y Opciones de Ruleta desde Firebase en tiempo real
+  // Sincronizar Álbum, Historial y Opciones de Ruleta desde Firebase
   useEffect(() => {
     // 1. Álbum
     const qAlbum = query(collection(db, 'album_citas'), orderBy('fecha', 'desc'));
     const unsubAlbum = onSnapshot(qAlbum, (snapshot) => {
-      setFotosAlbum(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setFotosAlbum(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // 2. Historial de citas sorteadas
+    // 2. Historial de citas
     const qHistorial = query(collection(db, 'historial_citas'), orderBy('fecha', 'desc'));
     const unsubHistorial = onSnapshot(qHistorial, (snapshot) => {
-      setHistorialCitas(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setHistorialCitas(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // 3. Opciones de la Ruleta (Sincronizadas en la nube)
+    // 3. Opciones de Ruleta
     const qRuleta = query(collection(db, 'ruleta_opciones'), orderBy('fecha', 'asc'));
     const unsubRuleta = onSnapshot(qRuleta, async (snapshot) => {
-      const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const fetched = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       if (fetched.length === 0) {
-        // Opciones por defecto si la base de datos está vacía
         const iniciales = ["Ir al cine", "Cena romántica", "Paseo nocturno", "Helados", "Quedarnos en casa"];
         for (const texto of iniciales) {
           await addDoc(collection(db, 'ruleta_opciones'), { texto, fecha: new Date().toISOString() });
@@ -87,7 +86,7 @@ const App = () => {
   const moveNoButton = () => setNoPosition({ x: (Math.random() * 150) - 75, y: (Math.random() * 150) - 75 });
   const handleSiClick = () => confetti({ particleCount: 300, spread: 100, origin: { y: 0.6 }, colors: ['#8B3A3A', '#D4AF37', '#5C1D24'] });
   
-  // --- LÓGICA DE LA RULETA EN FIREBASE ---
+  // --- GESTIÓN DE OPCIONES EN FIREBASE ---
   const agregarOpcionRuleta = async () => {
     if (nuevaOpcion.trim() !== '') {
       try {
@@ -115,6 +114,7 @@ const App = () => {
     setRuletaGirando(true);
     setCitaElegida('');
     
+    const textosOpciones = opcionesRuleta.map(o => o.texto);
     const girosExtra = (Math.floor(Math.random() * 5) + 5) * 360; 
     const gradosAleatorios = Math.floor(Math.random() * 360);
     const rotacionTotal = gradosRuleta + girosExtra + gradosAleatorios;
@@ -122,16 +122,16 @@ const App = () => {
     setGradosRuleta(rotacionTotal);
 
     setTimeout(async () => {
-      const anguloPorOpcion = 360 / opcionesRuleta.length;
+      const anguloPorOpcion = 360 / textosOpciones.length;
       const gradosNormalizados = (360 - (rotacionTotal % 360)) % 360;
       const indiceGanador = Math.floor(gradosNormalizados / anguloPorOpcion);
-      const seleccion = opcionesRuleta[indiceGanador].texto;
+      const seleccion = textosOpciones[Math.min(indiceGanador, textosOpciones.length - 1)];
       
       setCitaElegida(seleccion);
       setRuletaGirando(false);
       confetti({ particleCount: 150, spread: 70, colors: ['#8B3A3A', '#D4AF37'] });
 
-      // Guardar en el historial de Firestore
+      // Guardar en historial
       try {
         await addDoc(collection(db, 'historial_citas'), {
           titulo: seleccion,
@@ -193,7 +193,7 @@ const App = () => {
           </div>
         </FadeInSection>
 
-        {/* SECCIÓN 2: RULETA Y OPCIONES SINCRONIZADAS */}
+        {/* SECCIÓN 2: RULETA Y OPCIONES */}
         <FadeInSection>
           <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xl p-6 sm:p-8 text-center border border-[#8B3A3A]/20">
             <h2 className="text-3xl font-extrabold text-[#5C1D24] mb-2 font-serif">Nuestra Ruleta</h2>
