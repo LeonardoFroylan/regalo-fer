@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { Heart, Camera, Image as ImageIcon, Loader2, Plus, Sparkles, Trash2, Clock, Calendar } from 'lucide-react';
-import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
+import { Heart, Camera, Image as ImageIcon, Loader2, Plus, Sparkles, Trash2, Clock, Calendar, Gift } from 'lucide-react';
+import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, setDoc, increment } from 'firebase/firestore';
 import { db } from './firebase';
 
 // --- CONFIGURACIÓN DE CLOUDINARY ---
@@ -19,15 +19,23 @@ const App = () => {
   const [timeTogether, setTimeTogether] = useState({ years: 0, months: 0, days: 0 });
   const [noPosition, setNoPosition] = useState({ x: 0, y: 0 });
   
-  // --- ESTADOS DE LA RULETA SINCRONIZADOS ---
-  const [opcionesRuleta, setOpcionesRuleta] = useState([]); // [{id, texto}]
+  // --- ESTADOS: RULETA ---
+  const [opcionesRuleta, setOpcionesRuleta] = useState([]);
   const [nuevaOpcion, setNuevaOpcion] = useState('');
   const [ruletaGirando, setRuletaGirando] = useState(false);
   const [citaElegida, setCitaElegida] = useState('');
   const [gradosRuleta, setGradosRuleta] = useState(0);
   
+  // --- ESTADOS: WISHLISTS ---
+  const [wishlistLeo, setWishlistLeo] = useState([]);
+  const [nuevoDeseoLeo, setNuevoDeseoLeo] = useState('');
+  const [wishlistFer, setWishlistFer] = useState([]);
+  const [nuevoDeseoFer, setNuevoDeseoFer] = useState('');
+
+  // --- ESTADOS: ÁLBUM, HISTORIAL Y CONTADOR ---
   const [fotosAlbum, setFotosAlbum] = useState([]);
   const [historialCitas, setHistorialCitas] = useState([]);
+  const [contadorAmor, setContadorAmor] = useState(0);
   const [subiendo, setSubiendo] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -48,23 +56,17 @@ const App = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Sincronizar Álbum, Historial y Opciones de Ruleta desde Firebase
+  // Sincronización en tiempo real con Firebase
   useEffect(() => {
-    // 1. Álbum
-    const qAlbum = query(collection(db, 'album_citas'), orderBy('fecha', 'desc'));
-    const unsubAlbum = onSnapshot(qAlbum, (snapshot) => {
+    const unsubAlbum = onSnapshot(query(collection(db, 'album_citas'), orderBy('fecha', 'desc')), (snapshot) => {
       setFotosAlbum(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // 2. Historial de citas
-    const qHistorial = query(collection(db, 'historial_citas'), orderBy('fecha', 'desc'));
-    const unsubHistorial = onSnapshot(qHistorial, (snapshot) => {
+    const unsubHistorial = onSnapshot(query(collection(db, 'historial_citas'), orderBy('fecha', 'desc')), (snapshot) => {
       setHistorialCitas(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // 3. Opciones de Ruleta
-    const qRuleta = query(collection(db, 'ruleta_opciones'), orderBy('fecha', 'asc'));
-    const unsubRuleta = onSnapshot(qRuleta, async (snapshot) => {
+    const unsubRuleta = onSnapshot(query(collection(db, 'ruleta_opciones'), orderBy('fecha', 'asc')), async (snapshot) => {
       const fetched = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       if (fetched.length === 0) {
         const iniciales = ["Ir al cine", "Cena romántica", "Paseo nocturno", "Helados", "Quedarnos en casa"];
@@ -76,38 +78,47 @@ const App = () => {
       }
     });
 
-    return () => {
-      unsubAlbum();
-      unsubHistorial();
-      unsubRuleta();
-    };
+    const unsubWishLeo = onSnapshot(query(collection(db, 'wishlist_leo'), orderBy('fecha', 'asc')), (snapshot) => {
+      setWishlistLeo(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    const unsubWishFer = onSnapshot(query(collection(db, 'wishlist_fer'), orderBy('fecha', 'asc')), (snapshot) => {
+      setWishlistFer(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    // Escuchar el contador de amor
+    const unsubContador = onSnapshot(doc(db, 'estadisticas', 'amor'), (docSnap) => {
+      if (docSnap.exists()) {
+        setContadorAmor(docSnap.data().count || 0);
+      }
+    });
+
+    return () => { unsubAlbum(); unsubHistorial(); unsubRuleta(); unsubWishLeo(); unsubWishFer(); unsubContador(); };
   }, []);
 
   const moveNoButton = () => setNoPosition({ x: (Math.random() * 150) - 75, y: (Math.random() * 150) - 75 });
-  const handleSiClick = () => confetti({ particleCount: 300, spread: 100, origin: { y: 0.6 }, colors: ['#8B3A3A', '#D4AF37', '#5C1D24'] });
   
-  // --- GESTIÓN DE OPCIONES EN FIREBASE ---
+  // --- LÓGICA DEL BOTÓN SÍ Y CONTADOR ---
+  const handleSiClick = async () => {
+    confetti({ particleCount: 300, spread: 100, origin: { y: 0.6 }, colors: ['#8B3A3A', '#D4AF37', '#5C1D24'] });
+    try {
+      // Usamos increment para que sume 1 de forma segura en la base de datos
+      await setDoc(doc(db, 'estadisticas', 'amor'), {
+        count: increment(1)
+      }, { merge: true });
+    } catch (error) {
+      console.error("Error al actualizar contador:", error);
+    }
+  };
+  
+  // --- LÓGICA DE RULETA ---
   const agregarOpcionRuleta = async () => {
     if (nuevaOpcion.trim() !== '') {
-      try {
-        await addDoc(collection(db, 'ruleta_opciones'), {
-          texto: nuevaOpcion.trim(),
-          fecha: new Date().toISOString()
-        });
-        setNuevaOpcion('');
-      } catch (error) {
-        console.error("Error al agregar opción:", error);
-      }
+      try { await addDoc(collection(db, 'ruleta_opciones'), { texto: nuevaOpcion.trim(), fecha: new Date().toISOString() }); setNuevaOpcion(''); } 
+      catch (error) { console.error(error); }
     }
   };
-
-  const eliminarOpcion = async (id) => {
-    try {
-      await deleteDoc(doc(db, 'ruleta_opciones', id));
-    } catch (error) {
-      console.error("Error al eliminar opción:", error);
-    }
-  };
+  const eliminarOpcion = async (id) => { try { await deleteDoc(doc(db, 'ruleta_opciones', id)); } catch (error) { console.error(error); } };
 
   const girarRuleta = async () => {
     if (opcionesRuleta.length === 0) return;
@@ -118,7 +129,6 @@ const App = () => {
     const girosExtra = (Math.floor(Math.random() * 5) + 5) * 360; 
     const gradosAleatorios = Math.floor(Math.random() * 360);
     const rotacionTotal = gradosRuleta + girosExtra + gradosAleatorios;
-    
     setGradosRuleta(rotacionTotal);
 
     setTimeout(async () => {
@@ -131,15 +141,8 @@ const App = () => {
       setRuletaGirando(false);
       confetti({ particleCount: 150, spread: 70, colors: ['#8B3A3A', '#D4AF37'] });
 
-      // Guardar en historial
-      try {
-        await addDoc(collection(db, 'historial_citas'), {
-          titulo: seleccion,
-          fecha: new Date().toISOString()
-        });
-      } catch (error) {
-        console.error("Error al guardar historial:", error);
-      }
+      try { await addDoc(collection(db, 'historial_citas'), { titulo: seleccion, fecha: new Date().toISOString() }); } 
+      catch (error) { console.error(error); }
     }, 4000);
   };
 
@@ -149,6 +152,24 @@ const App = () => {
     ? `conic-gradient(${opcionesRuleta.map((_, i) => `${coloresRuleta[i % coloresRuleta.length]} ${i * anguloPorSlice}deg ${(i + 1) * anguloPorSlice}deg`).join(', ')})`
     : '#e5e7eb';
 
+  // --- LÓGICA DE WISHLISTS ---
+  const agregarDeseoLeo = async () => {
+    if (nuevoDeseoLeo.trim() !== '') {
+      try { await addDoc(collection(db, 'wishlist_leo'), { texto: nuevoDeseoLeo.trim(), fecha: new Date().toISOString() }); setNuevoDeseoLeo(''); } 
+      catch (error) { console.error(error); }
+    }
+  };
+  const eliminarDeseoLeo = async (id) => { try { await deleteDoc(doc(db, 'wishlist_leo', id)); } catch (error) { console.error(error); } };
+
+  const agregarDeseoFer = async () => {
+    if (nuevoDeseoFer.trim() !== '') {
+      try { await addDoc(collection(db, 'wishlist_fer'), { texto: nuevoDeseoFer.trim(), fecha: new Date().toISOString() }); setNuevoDeseoFer(''); } 
+      catch (error) { console.error(error); }
+    }
+  };
+  const eliminarDeseoFer = async (id) => { try { await deleteDoc(doc(db, 'wishlist_fer', id)); } catch (error) { console.error(error); } };
+
+  // --- LÓGICA DE CLOUDINARY ---
   const handleSubirArchivo = async (e) => {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
@@ -162,15 +183,10 @@ const App = () => {
         const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${isVideo?'video':'image'}/upload`, { method: 'POST', body: formData });
         const data = await res.json();
         if (data.secure_url) {
-          await addDoc(collection(db, 'album_citas'), { 
-            url: data.secure_url, 
-            tipo: isVideo ? 'video' : 'image', 
-            etiqueta: citaElegida || 'Nuestro recuerdo', 
-            fecha: new Date().toISOString() 
-          });
+          await addDoc(collection(db, 'album_citas'), { url: data.secure_url, tipo: isVideo ? 'video' : 'image', etiqueta: citaElegida || 'Nuestro recuerdo', fecha: new Date().toISOString() });
         }
       }
-    } catch (error) { console.error("Error:", error); } finally { setSubiendo(false); if(fileInputRef.current) fileInputRef.current.value = ''; }
+    } catch (error) { console.error(error); } finally { setSubiendo(false); if(fileInputRef.current) fileInputRef.current.value = ''; }
   };
 
   return (
@@ -199,24 +215,17 @@ const App = () => {
             <h2 className="text-3xl font-extrabold text-[#5C1D24] mb-2 font-serif">Nuestra Ruleta</h2>
             <p className="text-sm text-stone-500 mb-8">Agrega o elimina opciones en tiempo real.</p>
             
-            {/* Ruleta Visual Circular */}
             <div className="relative w-64 h-64 mx-auto mb-10">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-20">
                 <div className="w-0 h-0 border-l-[15px] border-r-[15px] border-t-[25px] border-l-transparent border-r-transparent border-t-[#5C1D24] drop-shadow-lg"></div>
               </div>
               
-              <div 
-                className="w-full h-full rounded-full border-4 border-[#F3ECE1] shadow-2xl overflow-hidden relative"
-                style={{ background: backgroundRuleta, transform: `rotate(${gradosRuleta}deg)`, transition: ruletaGirando ? 'transform 4s cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none' }}
-              >
+              <div className="w-full h-full rounded-full border-4 border-[#F3ECE1] shadow-2xl overflow-hidden relative" style={{ background: backgroundRuleta, transform: `rotate(${gradosRuleta}deg)`, transition: ruletaGirando ? 'transform 4s cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none' }}>
                 {opcionesRuleta.map((opcion, i) => {
                   const rotacionTexto = (i * anguloPorSlice) + (anguloPorSlice / 2);
                   return (
-                    <div key={opcion.id} className="absolute top-1/2 left-1/2 w-[50%] h-0 origin-left flex items-center justify-start pointer-events-none"
-                         style={{ transform: `translateY(-50%) rotate(${rotacionTexto - 90}deg)` }}>
-                      <span className="ml-4 text-white font-bold drop-shadow-md text-sm truncate max-w-[80px]">
-                        {opcion.texto}
-                      </span>
+                    <div key={opcion.id} className="absolute top-1/2 left-1/2 w-[50%] h-0 origin-left flex items-center justify-start pointer-events-none" style={{ transform: `translateY(-50%) rotate(${rotacionTexto - 90}deg)` }}>
+                      <span className="ml-4 text-white font-bold drop-shadow-md text-sm truncate max-w-[80px]">{opcion.texto}</span>
                     </div>
                   );
                 })}
@@ -226,13 +235,11 @@ const App = () => {
               </div>
             </div>
 
-            {/* Gestor de Opciones */}
             <div className="mb-6 space-y-2">
               <div className="flex bg-stone-50 rounded-full p-1 border border-stone-200 shadow-inner">
                 <input type="text" value={nuevaOpcion} onChange={(e) => setNuevaOpcion(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && agregarOpcionRuleta()} placeholder="Ej. Ir por tacos..." className="flex-1 bg-transparent px-4 py-2 outline-none text-sm text-stone-700" />
                 <button onClick={agregarOpcionRuleta} className="bg-[#8B3A3A] hover:bg-[#5C1D24] text-white p-2 rounded-full transition-colors flex items-center justify-center"><Plus className="w-5 h-5" /></button>
               </div>
-              
               <div className="flex flex-wrap gap-2 justify-center mt-4">
                 {opcionesRuleta.map((opc) => (
                   <span key={opc.id} className="bg-[#F3ECE1] text-[#5C1D24] text-xs py-1 px-3 rounded-full border border-[#8B3A3A]/20 flex items-center gap-1 font-medium">
@@ -252,32 +259,71 @@ const App = () => {
               {ruletaGirando ? 'GIRANDO...' : 'GIRAR RULETA'}
             </button>
 
-            {/* Historial de Citas */}
             <div className="mt-10 pt-6 border-t border-stone-200 text-left">
-              <h3 className="text-lg font-bold text-[#5C1D24] mb-3 flex items-center gap-2 font-serif">
-                <Clock className="w-5 h-5 text-[#8B3A3A]" /> Historial de Citas Elegidas
-              </h3>
+              <h3 className="text-lg font-bold text-[#5C1D24] mb-3 flex items-center gap-2 font-serif"><Clock className="w-5 h-5 text-[#8B3A3A]" /> Historial de Citas</h3>
               {historialCitas.length === 0 ? (
-                <p className="text-xs text-stone-400 italic text-center py-2">Aún no hay citas sorteadas. ¡Gira la ruleta para registrar la primera!</p>
+                <p className="text-xs text-stone-400 italic text-center py-2">Aún no hay citas sorteadas.</p>
               ) : (
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                   {historialCitas.map((cita) => (
                     <div key={cita.id} className="bg-[#FAF7F2] p-3 rounded-xl border border-stone-200 flex items-center justify-between text-xs">
                       <span className="font-semibold text-stone-700">{cita.titulo}</span>
-                      <span className="text-stone-400 flex items-center gap-1">
-                        <Calendar className="w-3 h-3 text-[#8B3A3A]" />
-                        {new Date(cita.fecha).toLocaleDateString()}
-                      </span>
+                      <span className="text-stone-400 flex items-center gap-1"><Calendar className="w-3 h-3 text-[#8B3A3A]" />{new Date(cita.fecha).toLocaleDateString()}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-
           </div>
         </FadeInSection>
 
-        {/* SECCIÓN 3: ÁLBUM ETERNO */}
+        {/* SECCIÓN 3: WISHLISTS */}
+        <FadeInSection>
+          <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xl p-6 sm:p-8 border border-[#8B3A3A]/20">
+            <h2 className="text-3xl font-extrabold text-[#5C1D24] mb-2 font-serif text-center flex items-center justify-center gap-2">
+              <Gift className="w-7 h-7 text-[#D4AF37]" /> Listas de Deseos
+            </h2>
+            <p className="text-sm text-center text-stone-500 mb-8">Ideas de regalitos para consentirnos.</p>
+            
+            <div className="grid grid-cols-1 gap-8">
+              {/* Wishlist Fer */}
+              <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-stone-200 shadow-sm">
+                <h3 className="text-lg font-bold text-[#8B3A3A] mb-4 font-serif text-center border-b border-stone-200 pb-2">Para consentir a Maria</h3>
+                <div className="flex bg-white rounded-full p-1 border border-stone-200 shadow-inner mb-4">
+                  <input type="text" value={nuevoDeseoFer} onChange={(e) => setNuevoDeseoFer(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && agregarDeseoFer()} placeholder="Ej. Un ramo de rosas..." className="flex-1 bg-transparent px-4 py-2 outline-none text-sm text-stone-700" />
+                  <button onClick={agregarDeseoFer} className="bg-[#8B3A3A] hover:bg-[#5C1D24] text-white p-2 rounded-full transition-colors flex items-center justify-center"><Plus className="w-4 h-4" /></button>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {wishlistFer.length === 0 ? <p className="text-xs text-stone-400 italic text-center">Sin ideas aún.</p> : wishlistFer.map((deseo) => (
+                    <div key={deseo.id} className="bg-white p-3 rounded-xl border border-stone-100 flex items-center justify-between text-sm shadow-sm">
+                      <span className="text-stone-700 font-medium">{deseo.texto}</span>
+                      <button onClick={() => eliminarDeseoFer(deseo.id)} className="text-stone-400 hover:text-[#8B3A3A] p-1"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Wishlist Leo */}
+              <div className="bg-[#F3ECE1] p-5 rounded-2xl border border-[#D4AF37]/30 shadow-sm">
+                <h3 className="text-lg font-bold text-[#5C1D24] mb-4 font-serif text-center border-b border-stone-300 pb-2">Para consentir a Leo</h3>
+                <div className="flex bg-white rounded-full p-1 border border-stone-200 shadow-inner mb-4">
+                  <input type="text" value={nuevoDeseoLeo} onChange={(e) => setNuevoDeseoLeo(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && agregarDeseoLeo()} placeholder="Ej. Tarjeta de regalo..." className="flex-1 bg-transparent px-4 py-2 outline-none text-sm text-stone-700" />
+                  <button onClick={agregarDeseoLeo} className="bg-[#5C1D24] hover:bg-[#8B3A3A] text-white p-2 rounded-full transition-colors flex items-center justify-center"><Plus className="w-4 h-4" /></button>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {wishlistLeo.length === 0 ? <p className="text-xs text-stone-400 italic text-center">Sin ideas aún.</p> : wishlistLeo.map((deseo) => (
+                    <div key={deseo.id} className="bg-white p-3 rounded-xl border border-stone-100 flex items-center justify-between text-sm shadow-sm">
+                      <span className="text-stone-700 font-medium">{deseo.texto}</span>
+                      <button onClick={() => eliminarDeseoLeo(deseo.id)} className="text-stone-400 hover:text-[#5C1D24] p-1"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </FadeInSection>
+
+        {/* SECCIÓN 4: ÁLBUM ETERNO */}
         <FadeInSection>
           <div className="bg-white/90 backdrop-blur-md rounded-3xl shadow-xl p-6 sm:p-8 border border-[#8B3A3A]/20">
             <h3 className="text-2xl font-extrabold text-[#5C1D24] mb-2 flex items-center justify-center gap-2 font-serif"><ImageIcon className="w-7 h-7 text-[#8B3A3A]" /> Álbum Eterno</h3>
@@ -297,14 +343,27 @@ const App = () => {
           </div>
         </FadeInSection>
 
-        {/* SECCIÓN 4: BOTÓN ESCURRIDIZO */}
+        {/* SECCIÓN 5: BOTÓN ESCURRIDIZO Y CONTADOR */}
         <FadeInSection>
           <div className="text-center py-10">
             <h2 className="text-3xl font-extrabold text-[#5C1D24] mb-10 drop-shadow-sm font-serif">¿Me amas?</h2>
+            
             <div className="flex justify-center items-center h-24 relative w-full max-w-[280px] mx-auto">
-              <button onClick={handleSiClick} className="bg-gradient-to-r from-[#8B3A3A] to-[#5C1D24] text-white px-10 py-3 rounded-full font-bold shadow-lg hover:shadow-xl active:scale-95 transition-transform z-10 text-lg">¡Sí!</button>
-              <motion.button animate={{ x: noPosition.x, y: noPosition.y }} onMouseEnter={moveNoButton} onClick={moveNoButton} onTouchStart={moveNoButton} className="bg-white text-stone-400 px-8 py-3 rounded-full absolute ml-32 shadow-sm font-semibold border border-stone-200">No</motion.button>
+              <button onClick={handleSiClick} className="bg-gradient-to-r from-[#8B3A3A] to-[#5C1D24] text-white px-10 py-3 rounded-full font-bold shadow-lg hover:shadow-xl active:scale-95 transition-transform z-10 text-lg">
+                ¡Sí!
+              </button>
+              <motion.button animate={{ x: noPosition.x, y: noPosition.y }} onMouseEnter={moveNoButton} onClick={moveNoButton} onTouchStart={moveNoButton} className="bg-white text-stone-400 px-8 py-3 rounded-full absolute ml-32 shadow-sm font-semibold border border-stone-200">
+                No
+              </motion.button>
             </div>
+
+            {/* Contador Interactivo de Amor */}
+            {contadorAmor > 0 && (
+              <motion.p initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} className="mt-8 text-sm font-medium text-[#8B3A3A] bg-white/60 py-2 px-5 rounded-full inline-block border border-[#D4AF37]/30 shadow-sm backdrop-blur-sm">
+                Me has dicho que sí <span className="font-bold text-[#5C1D24] text-lg mx-1">{contadorAmor}</span> {contadorAmor === 1 ? 'vez' : 'veces'} ❤️
+              </motion.p>
+            )}
+
           </div>
         </FadeInSection>
         
