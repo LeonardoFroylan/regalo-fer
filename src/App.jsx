@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { Heart, Camera, Image as ImageIcon, Loader2, Plus, Sparkles, Trash2, Clock, Calendar, Gift } from 'lucide-react';
+import { Heart, Camera, Image as ImageIcon, Loader2, Plus, Sparkles, Trash2, Clock, Calendar, Gift, ArrowLeftRight, Mail, MailOpen, X } from 'lucide-react';
 import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, setDoc, increment } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -31,6 +31,12 @@ const App = () => {
   const [nuevoDeseoLeo, setNuevoDeseoLeo] = useState('');
   const [wishlistFer, setWishlistFer] = useState([]);
   const [nuevoDeseoFer, setNuevoDeseoFer] = useState('');
+
+  // --- ESTADOS: CARTAS DE AMOR (NUEVO) ---
+  const [cartas, setCartas] = useState([]);
+  const [nuevaCarta, setNuevaCarta] = useState('');
+  const [remitenteEsLeo, setRemitenteEsLeo] = useState(true); // true = De Leo para Fer, false = De Fer para Leo
+  const [cartaAbierta, setCartaAbierta] = useState(null); // Guardará la carta que se está leyendo
 
   // --- ESTADOS: ÁLBUM, HISTORIAL Y CONTADOR ---
   const [fotosAlbum, setFotosAlbum] = useState([]);
@@ -86,29 +92,23 @@ const App = () => {
       setWishlistFer(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // Escuchar el contador de amor
-    const unsubContador = onSnapshot(doc(db, 'estadisticas', 'amor'), (docSnap) => {
-      if (docSnap.exists()) {
-        setContadorAmor(docSnap.data().count || 0);
-      }
+    const unsubCartas = onSnapshot(query(collection(db, 'cartas_amor'), orderBy('fecha', 'desc')), (snapshot) => {
+      setCartas(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    return () => { unsubAlbum(); unsubHistorial(); unsubRuleta(); unsubWishLeo(); unsubWishFer(); unsubContador(); };
+    const unsubContador = onSnapshot(doc(db, 'estadisticas', 'amor'), (docSnap) => {
+      if (docSnap.exists()) { setContadorAmor(docSnap.data().count || 0); }
+    });
+
+    return () => { unsubAlbum(); unsubHistorial(); unsubRuleta(); unsubWishLeo(); unsubWishFer(); unsubCartas(); unsubContador(); };
   }, []);
 
   const moveNoButton = () => setNoPosition({ x: (Math.random() * 150) - 75, y: (Math.random() * 150) - 75 });
   
-  // --- LÓGICA DEL BOTÓN SÍ Y CONTADOR ---
   const handleSiClick = async () => {
     confetti({ particleCount: 300, spread: 100, origin: { y: 0.6 }, colors: ['#8B3A3A', '#D4AF37', '#5C1D24'] });
-    try {
-      // Usamos increment para que sume 1 de forma segura en la base de datos
-      await setDoc(doc(db, 'estadisticas', 'amor'), {
-        count: increment(1)
-      }, { merge: true });
-    } catch (error) {
-      console.error("Error al actualizar contador:", error);
-    }
+    try { await setDoc(doc(db, 'estadisticas', 'amor'), { count: increment(1) }, { merge: true }); } 
+    catch (error) { console.error(error); }
   };
   
   // --- LÓGICA DE RULETA ---
@@ -169,6 +169,24 @@ const App = () => {
   };
   const eliminarDeseoFer = async (id) => { try { await deleteDoc(doc(db, 'wishlist_fer', id)); } catch (error) { console.error(error); } };
 
+  // --- LÓGICA DE CARTAS DE AMOR ---
+  const guardarCarta = async () => {
+    if (nuevaCarta.trim() !== '') {
+      try {
+        await addDoc(collection(db, 'cartas_amor'), {
+          de: remitenteEsLeo ? 'Leo' : 'Fer',
+          para: remitenteEsLeo ? 'Fer' : 'Leo',
+          mensaje: nuevaCarta.trim(),
+          fecha: new Date().toISOString()
+        });
+        setNuevaCarta('');
+        // Efecto visual al enviar
+        confetti({ particleCount: 50, spread: 60, origin: { y: 0.8 }, colors: ['#D4AF37', '#ffffff'] });
+      } catch (error) { console.error(error); }
+    }
+  };
+  const eliminarCarta = async (id) => { try { await deleteDoc(doc(db, 'cartas_amor', id)); setCartaAbierta(null); } catch (error) { console.error(error); } };
+
   // --- LÓGICA DE CLOUDINARY ---
   const handleSubirArchivo = async (e) => {
     const files = Array.from(e.target.files);
@@ -190,7 +208,45 @@ const App = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#FAF7F2] via-[#F3ECE1] to-[#EAE0D0] flex flex-col items-center py-10 px-4 sm:px-6 font-sans text-stone-800 overflow-x-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-[#FAF7F2] via-[#F3ECE1] to-[#EAE0D0] flex flex-col items-center py-10 px-4 sm:px-6 font-sans text-stone-800 overflow-x-hidden relative">
+      
+      {/* --- MODAL DE CARTA ABIERTA --- */}
+      <AnimatePresence>
+        {cartaAbierta && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            onClick={() => setCartaAbierta(null)}
+          >
+            <motion.div 
+              initial={{ scale: 0.8, y: 50, rotateX: 45 }} animate={{ scale: 1, y: 0, rotateX: 0 }} exit={{ scale: 0.8, y: 50, opacity: 0 }}
+              transition={{ type: "spring", damping: 20, stiffness: 100 }}
+              className="bg-[#FAF7F2] w-full max-w-sm rounded-lg shadow-2xl p-6 relative border border-[#D4AF37]/40"
+              style={{ backgroundImage: "radial-gradient(#d7d7d7 1px, transparent 1px)", backgroundSize: "20px 20px" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button onClick={() => setCartaAbierta(null)} className="absolute top-4 right-4 text-stone-400 hover:text-[#5C1D24]"><X className="w-5 h-5" /></button>
+              
+              <div className="border-b border-[#D4AF37]/30 pb-3 mb-4 text-center">
+                <h4 className="font-serif text-[#5C1D24] text-lg font-bold">De: {cartaAbierta.de}</h4>
+                <h5 className="font-serif text-[#8B3A3A] text-sm">Para: {cartaAbierta.para}</h5>
+              </div>
+              
+              <p className="font-serif text-stone-700 text-lg leading-relaxed whitespace-pre-wrap italic mb-6">
+                "{cartaAbierta.mensaje}"
+              </p>
+              
+              <div className="flex justify-between items-center text-xs text-stone-400 border-t border-stone-200 pt-3">
+                <span>{new Date(cartaAbierta.fecha).toLocaleDateString()}</span>
+                <button onClick={() => eliminarCarta(cartaAbierta.id)} className="text-rose-400 hover:text-rose-600 flex items-center gap-1">
+                  <Trash2 className="w-3 h-3"/> Borrar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="w-full max-w-md space-y-12">
         
         {/* SECCIÓN 1: NUESTRA HISTORIA */}
@@ -209,7 +265,80 @@ const App = () => {
           </div>
         </FadeInSection>
 
-        {/* SECCIÓN 2: RULETA Y OPCIONES */}
+        {/* SECCIÓN 2: BUZÓN DE AMOR (CARTAS) */}
+        <FadeInSection>
+          <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xl p-6 sm:p-8 border border-[#8B3A3A]/20">
+            <h2 className="text-3xl font-extrabold text-[#5C1D24] mb-2 font-serif text-center flex items-center justify-center gap-2">
+              <Mail className="w-7 h-7 text-[#8B3A3A]" /> Buzón de Amor
+            </h2>
+            <p className="text-sm text-center text-stone-500 mb-8">Escribe una carta sorpresa para tu persona favorita.</p>
+
+            {/* Redactor de Carta */}
+            <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-stone-200 shadow-sm mb-6">
+              
+              {/* Selector de Remitente/Destinatario con Animación */}
+              <div className="flex items-center justify-center gap-4 mb-4 pb-4 border-b border-stone-200">
+                <div className={`text-sm font-bold w-16 text-right ${remitenteEsLeo ? 'text-[#5C1D24]' : 'text-[#8B3A3A]'}`}>
+                  De: {remitenteEsLeo ? 'Leo' : 'Maria'}
+                </div>
+                
+                <button onClick={() => setRemitenteEsLeo(!remitenteEsLeo)} className="bg-white border border-[#D4AF37]/50 p-2 rounded-full shadow-sm hover:scale-110 active:scale-95 transition-transform">
+                  <ArrowLeftRight className="w-4 h-4 text-[#D4AF37]" />
+                </button>
+                
+                <div className={`text-sm font-bold w-16 text-left ${!remitenteEsLeo ? 'text-[#5C1D24]' : 'text-[#8B3A3A]'}`}>
+                  Para: {remitenteEsLeo ? 'Maria' : 'Leo'}
+                </div>
+              </div>
+
+              {/* Área de texto */}
+              <textarea 
+                value={nuevaCarta} 
+                onChange={(e) => setNuevaCarta(e.target.value)} 
+                placeholder="Escribe lo que sientes aquí..." 
+                className="w-full bg-transparent resize-none h-28 outline-none text-stone-700 font-serif italic"
+              ></textarea>
+              
+              <button 
+                onClick={guardarCarta} 
+                disabled={!nuevaCarta.trim()}
+                className="w-full mt-2 bg-[#8B3A3A] hover:bg-[#5C1D24] text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+              >
+                <Mail className="w-4 h-4" /> Sellar y Enviar
+              </button>
+            </div>
+
+            {/* Cuadrícula de Sobres Guardados */}
+            <div className="mt-8">
+              <h3 className="text-sm font-bold text-[#5C1D24] mb-3 uppercase tracking-wider text-center">Cartas Recibidas</h3>
+              {cartas.length === 0 ? (
+                <p className="text-xs text-stone-400 italic text-center">El buzón está vacío.</p>
+              ) : (
+                <div className="grid grid-cols-3 gap-3">
+                  {cartas.map((carta) => (
+                    <motion.div 
+                      key={carta.id} 
+                      whileHover={{ y: -5 }}
+                      onClick={() => setCartaAbierta(carta)}
+                      className="bg-[#F3ECE1] border border-[#D4AF37]/40 rounded-lg p-3 flex flex-col items-center justify-center gap-2 cursor-pointer shadow-sm hover:shadow-md transition-shadow relative"
+                    >
+                      {/* Sello de cera simulado */}
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-10">
+                        <Heart className="w-10 h-10 text-[#8B3A3A]" fill="currentColor" />
+                      </div>
+                      
+                      <MailOpen className="w-6 h-6 text-[#5C1D24] z-10" />
+                      <span className="text-[10px] font-bold text-[#8B3A3A] z-10">De: {carta.de}</span>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+          </div>
+        </FadeInSection>
+
+        {/* SECCIÓN 3: RULETA Y OPCIONES */}
         <FadeInSection>
           <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xl p-6 sm:p-8 text-center border border-[#8B3A3A]/20">
             <h2 className="text-3xl font-extrabold text-[#5C1D24] mb-2 font-serif">Nuestra Ruleta</h2>
@@ -277,7 +406,7 @@ const App = () => {
           </div>
         </FadeInSection>
 
-        {/* SECCIÓN 3: WISHLISTS */}
+        {/* SECCIÓN 4: WISHLISTS */}
         <FadeInSection>
           <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xl p-6 sm:p-8 border border-[#8B3A3A]/20">
             <h2 className="text-3xl font-extrabold text-[#5C1D24] mb-2 font-serif text-center flex items-center justify-center gap-2">
@@ -323,7 +452,7 @@ const App = () => {
           </div>
         </FadeInSection>
 
-        {/* SECCIÓN 4: ÁLBUM ETERNO */}
+        {/* SECCIÓN 5: ÁLBUM ETERNO */}
         <FadeInSection>
           <div className="bg-white/90 backdrop-blur-md rounded-3xl shadow-xl p-6 sm:p-8 border border-[#8B3A3A]/20">
             <h3 className="text-2xl font-extrabold text-[#5C1D24] mb-2 flex items-center justify-center gap-2 font-serif"><ImageIcon className="w-7 h-7 text-[#8B3A3A]" /> Álbum Eterno</h3>
@@ -343,7 +472,7 @@ const App = () => {
           </div>
         </FadeInSection>
 
-        {/* SECCIÓN 5: BOTÓN ESCURRIDIZO Y CONTADOR */}
+        {/* SECCIÓN 6: BOTÓN ESCURRIDIZO Y CONTADOR */}
         <FadeInSection>
           <div className="text-center py-10">
             <h2 className="text-3xl font-extrabold text-[#5C1D24] mb-10 drop-shadow-sm font-serif">¿Me amas?</h2>
@@ -357,7 +486,6 @@ const App = () => {
               </motion.button>
             </div>
 
-            {/* Contador Interactivo de Amor */}
             {contadorAmor > 0 && (
               <motion.p initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} className="mt-8 text-sm font-medium text-[#8B3A3A] bg-white/60 py-2 px-5 rounded-full inline-block border border-[#D4AF37]/30 shadow-sm backdrop-blur-sm">
                 Me has dicho que sí <span className="font-bold text-[#5C1D24] text-lg mx-1">{contadorAmor}</span> {contadorAmor === 1 ? 'vez' : 'veces'} ❤️
