@@ -29,14 +29,14 @@ const App = () => {
   // --- ESTADOS: WISHLISTS ---
   const [wishlistLeo, setWishlistLeo] = useState([]);
   const [nuevoDeseoLeo, setNuevoDeseoLeo] = useState('');
-  const [wishlistFer, setWishlistFer] = useState([]);
-  const [nuevoDeseoFer, setNuevoDeseoFer] = useState('');
+  const [wishlistMaria, setWishlistMaria] = useState([]);
+  const [nuevoDeseoMaria, setNuevoDeseoMaria] = useState('');
 
-  // --- ESTADOS: CARTAS DE AMOR (NUEVO) ---
+  // --- ESTADOS: CARTAS DE AMOR ---
   const [cartas, setCartas] = useState([]);
   const [nuevaCarta, setNuevaCarta] = useState('');
-  const [remitenteEsLeo, setRemitenteEsLeo] = useState(true); // true = De Leo para Fer, false = De Fer para Leo
-  const [cartaAbierta, setCartaAbierta] = useState(null); // Guardará la carta que se está leyendo
+  const [remitenteEsLeo, setRemitenteEsLeo] = useState(true); 
+  const [cartaAbierta, setCartaAbierta] = useState(null); 
 
   // --- ESTADOS: ÁLBUM, HISTORIAL Y CONTADOR ---
   const [fotosAlbum, setFotosAlbum] = useState([]);
@@ -45,7 +45,6 @@ const App = () => {
   const [subiendo, setSubiendo] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Contador de tiempo
   useEffect(() => {
     const startDate = new Date('2023-01-07T00:00:00');
     const updateCounter = () => {
@@ -62,7 +61,6 @@ const App = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Sincronización en tiempo real con Firebase
   useEffect(() => {
     const unsubAlbum = onSnapshot(query(collection(db, 'album_citas'), orderBy('fecha', 'desc')), (snapshot) => {
       setFotosAlbum(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -88,8 +86,8 @@ const App = () => {
       setWishlistLeo(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    const unsubWishFer = onSnapshot(query(collection(db, 'wishlist_fer'), orderBy('fecha', 'asc')), (snapshot) => {
-      setWishlistFer(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    const unsubWishMaria = onSnapshot(query(collection(db, 'wishlist_maria'), orderBy('fecha', 'asc')), (snapshot) => {
+      setWishlistMaria(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
     const unsubCartas = onSnapshot(query(collection(db, 'cartas_amor'), orderBy('fecha', 'desc')), (snapshot) => {
@@ -100,7 +98,7 @@ const App = () => {
       if (docSnap.exists()) { setContadorAmor(docSnap.data().count || 0); }
     });
 
-    return () => { unsubAlbum(); unsubHistorial(); unsubRuleta(); unsubWishLeo(); unsubWishFer(); unsubCartas(); unsubContador(); };
+    return () => { unsubAlbum(); unsubHistorial(); unsubRuleta(); unsubWishLeo(); unsubWishMaria(); unsubCartas(); unsubContador(); };
   }, []);
 
   const moveNoButton = () => setNoPosition({ x: (Math.random() * 150) - 75, y: (Math.random() * 150) - 75 });
@@ -161,26 +159,25 @@ const App = () => {
   };
   const eliminarDeseoLeo = async (id) => { try { await deleteDoc(doc(db, 'wishlist_leo', id)); } catch (error) { console.error(error); } };
 
-  const agregarDeseoFer = async () => {
-    if (nuevoDeseoFer.trim() !== '') {
-      try { await addDoc(collection(db, 'wishlist_fer'), { texto: nuevoDeseoFer.trim(), fecha: new Date().toISOString() }); setNuevoDeseoFer(''); } 
+  const agregarDeseoMaria = async () => {
+    if (nuevoDeseoMaria.trim() !== '') {
+      try { await addDoc(collection(db, 'wishlist_maria'), { texto: nuevoDeseoMaria.trim(), fecha: new Date().toISOString() }); setNuevoDeseoMaria(''); } 
       catch (error) { console.error(error); }
     }
   };
-  const eliminarDeseoFer = async (id) => { try { await deleteDoc(doc(db, 'wishlist_fer', id)); } catch (error) { console.error(error); } };
+  const eliminarDeseoMaria = async (id) => { try { await deleteDoc(doc(db, 'wishlist_maria', id)); } catch (error) { console.error(error); } };
 
   // --- LÓGICA DE CARTAS DE AMOR ---
   const guardarCarta = async () => {
     if (nuevaCarta.trim() !== '') {
       try {
         await addDoc(collection(db, 'cartas_amor'), {
-          de: remitenteEsLeo ? 'Leo' : 'Fer',
-          para: remitenteEsLeo ? 'Fer' : 'Leo',
+          de: remitenteEsLeo ? 'Leo' : 'Maria',
+          para: remitenteEsLeo ? 'Maria' : 'Leo',
           mensaje: nuevaCarta.trim(),
           fecha: new Date().toISOString()
         });
         setNuevaCarta('');
-        // Efecto visual al enviar
         confetti({ particleCount: 50, spread: 60, origin: { y: 0.8 }, colors: ['#D4AF37', '#ffffff'] });
       } catch (error) { console.error(error); }
     }
@@ -210,7 +207,7 @@ const App = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#FAF7F2] via-[#F3ECE1] to-[#EAE0D0] flex flex-col items-center py-10 px-4 sm:px-6 font-sans text-stone-800 overflow-x-hidden relative">
       
-      {/* --- MODAL DE CARTA ABIERTA --- */}
+      {/* --- MODAL DE CARTA ABIERTA (CON SCROLL INTEGRADO) --- */}
       <AnimatePresence>
         {cartaAbierta && (
           <motion.div 
@@ -221,13 +218,13 @@ const App = () => {
             <motion.div 
               initial={{ scale: 0.8, y: 50, rotateX: 45 }} animate={{ scale: 1, y: 0, rotateX: 0 }} exit={{ scale: 0.8, y: 50, opacity: 0 }}
               transition={{ type: "spring", damping: 20, stiffness: 100 }}
-              className="bg-[#FAF7F2] w-full max-w-sm rounded-lg shadow-2xl p-6 relative border border-[#D4AF37]/40"
+              className="bg-[#FAF7F2] w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-lg shadow-2xl p-6 relative border border-[#D4AF37]/40 flex flex-col"
               style={{ backgroundImage: "radial-gradient(#d7d7d7 1px, transparent 1px)", backgroundSize: "20px 20px" }}
               onClick={(e) => e.stopPropagation()}
             >
-              <button onClick={() => setCartaAbierta(null)} className="absolute top-4 right-4 text-stone-400 hover:text-[#5C1D24]"><X className="w-5 h-5" /></button>
+              <button onClick={() => setCartaAbierta(null)} className="absolute top-3 right-3 text-stone-400 hover:text-[#5C1D24] bg-[#FAF7F2] rounded-full p-1"><X className="w-6 h-6" /></button>
               
-              <div className="border-b border-[#D4AF37]/30 pb-3 mb-4 text-center">
+              <div className="border-b border-[#D4AF37]/30 pb-3 mb-4 mt-2 text-center shrink-0">
                 <h4 className="font-serif text-[#5C1D24] text-lg font-bold">De: {cartaAbierta.de}</h4>
                 <h5 className="font-serif text-[#8B3A3A] text-sm">Para: {cartaAbierta.para}</h5>
               </div>
@@ -236,9 +233,9 @@ const App = () => {
                 "{cartaAbierta.mensaje}"
               </p>
               
-              <div className="flex justify-between items-center text-xs text-stone-400 border-t border-stone-200 pt-3">
+              <div className="flex justify-between items-center text-xs text-stone-400 border-t border-stone-200 pt-4 mt-auto shrink-0">
                 <span>{new Date(cartaAbierta.fecha).toLocaleDateString()}</span>
-                <button onClick={() => eliminarCarta(cartaAbierta.id)} className="text-rose-400 hover:text-rose-600 flex items-center gap-1">
+                <button onClick={() => eliminarCarta(cartaAbierta.id)} className="text-rose-400 hover:text-rose-600 flex items-center gap-1 bg-white px-2 py-1 rounded-md shadow-sm border border-stone-100">
                   <Trash2 className="w-3 h-3"/> Borrar
                 </button>
               </div>
@@ -265,7 +262,7 @@ const App = () => {
           </div>
         </FadeInSection>
 
-        {/* SECCIÓN 2: BUZÓN DE AMOR (CARTAS) */}
+        {/* SECCIÓN 2: BUZÓN DE AMOR */}
         <FadeInSection>
           <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xl p-6 sm:p-8 border border-[#8B3A3A]/20">
             <h2 className="text-3xl font-extrabold text-[#5C1D24] mb-2 font-serif text-center flex items-center justify-center gap-2">
@@ -273,25 +270,19 @@ const App = () => {
             </h2>
             <p className="text-sm text-center text-stone-500 mb-8">Escribe una carta sorpresa para tu persona favorita.</p>
 
-            {/* Redactor de Carta */}
             <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-stone-200 shadow-sm mb-6">
-              
-              {/* Selector de Remitente/Destinatario con Animación */}
               <div className="flex items-center justify-center gap-4 mb-4 pb-4 border-b border-stone-200">
                 <div className={`text-sm font-bold w-16 text-right ${remitenteEsLeo ? 'text-[#5C1D24]' : 'text-[#8B3A3A]'}`}>
                   De: {remitenteEsLeo ? 'Leo' : 'Maria'}
                 </div>
-                
                 <button onClick={() => setRemitenteEsLeo(!remitenteEsLeo)} className="bg-white border border-[#D4AF37]/50 p-2 rounded-full shadow-sm hover:scale-110 active:scale-95 transition-transform">
                   <ArrowLeftRight className="w-4 h-4 text-[#D4AF37]" />
                 </button>
-                
                 <div className={`text-sm font-bold w-16 text-left ${!remitenteEsLeo ? 'text-[#5C1D24]' : 'text-[#8B3A3A]'}`}>
                   Para: {remitenteEsLeo ? 'Maria' : 'Leo'}
                 </div>
               </div>
 
-              {/* Área de texto */}
               <textarea 
                 value={nuevaCarta} 
                 onChange={(e) => setNuevaCarta(e.target.value)} 
@@ -308,7 +299,6 @@ const App = () => {
               </button>
             </div>
 
-            {/* Cuadrícula de Sobres Guardados */}
             <div className="mt-8">
               <h3 className="text-sm font-bold text-[#5C1D24] mb-3 uppercase tracking-wider text-center">Cartas Recibidas</h3>
               {cartas.length === 0 ? (
@@ -322,11 +312,9 @@ const App = () => {
                       onClick={() => setCartaAbierta(carta)}
                       className="bg-[#F3ECE1] border border-[#D4AF37]/40 rounded-lg p-3 flex flex-col items-center justify-center gap-2 cursor-pointer shadow-sm hover:shadow-md transition-shadow relative"
                     >
-                      {/* Sello de cera simulado */}
                       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-10">
                         <Heart className="w-10 h-10 text-[#8B3A3A]" fill="currentColor" />
                       </div>
-                      
                       <MailOpen className="w-6 h-6 text-[#5C1D24] z-10" />
                       <span className="text-[10px] font-bold text-[#8B3A3A] z-10">De: {carta.de}</span>
                     </motion.div>
@@ -334,7 +322,6 @@ const App = () => {
                 </div>
               )}
             </div>
-
           </div>
         </FadeInSection>
 
@@ -415,24 +402,22 @@ const App = () => {
             <p className="text-sm text-center text-stone-500 mb-8">Ideas de regalitos para consentirnos.</p>
             
             <div className="grid grid-cols-1 gap-8">
-              {/* Wishlist Fer */}
               <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-stone-200 shadow-sm">
                 <h3 className="text-lg font-bold text-[#8B3A3A] mb-4 font-serif text-center border-b border-stone-200 pb-2">Para consentir a Maria</h3>
                 <div className="flex bg-white rounded-full p-1 border border-stone-200 shadow-inner mb-4">
-                  <input type="text" value={nuevoDeseoFer} onChange={(e) => setNuevoDeseoFer(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && agregarDeseoFer()} placeholder="Ej. Un ramo de rosas..." className="flex-1 bg-transparent px-4 py-2 outline-none text-sm text-stone-700" />
-                  <button onClick={agregarDeseoFer} className="bg-[#8B3A3A] hover:bg-[#5C1D24] text-white p-2 rounded-full transition-colors flex items-center justify-center"><Plus className="w-4 h-4" /></button>
+                  <input type="text" value={nuevoDeseoMaria} onChange={(e) => setNuevoDeseoMaria(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && agregarDeseoMaria()} placeholder="Ej. Un ramo de rosas..." className="flex-1 bg-transparent px-4 py-2 outline-none text-sm text-stone-700" />
+                  <button onClick={agregarDeseoMaria} className="bg-[#8B3A3A] hover:bg-[#5C1D24] text-white p-2 rounded-full transition-colors flex items-center justify-center"><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                  {wishlistFer.length === 0 ? <p className="text-xs text-stone-400 italic text-center">Sin ideas aún.</p> : wishlistFer.map((deseo) => (
+                  {wishlistMaria.length === 0 ? <p className="text-xs text-stone-400 italic text-center">Sin ideas aún.</p> : wishlistMaria.map((deseo) => (
                     <div key={deseo.id} className="bg-white p-3 rounded-xl border border-stone-100 flex items-center justify-between text-sm shadow-sm">
                       <span className="text-stone-700 font-medium">{deseo.texto}</span>
-                      <button onClick={() => eliminarDeseoFer(deseo.id)} className="text-stone-400 hover:text-[#8B3A3A] p-1"><Trash2 className="w-4 h-4" /></button>
+                      <button onClick={() => eliminarDeseoMaria(deseo.id)} className="text-stone-400 hover:text-[#8B3A3A] p-1"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Wishlist Leo */}
               <div className="bg-[#F3ECE1] p-5 rounded-2xl border border-[#D4AF37]/30 shadow-sm">
                 <h3 className="text-lg font-bold text-[#5C1D24] mb-4 font-serif text-center border-b border-stone-300 pb-2">Para consentir a Leo</h3>
                 <div className="flex bg-white rounded-full p-1 border border-stone-200 shadow-inner mb-4">
