@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { Heart, Camera, Image as ImageIcon, Loader2, Plus, Sparkles, Trash2, Clock, Calendar, Gift, ArrowLeftRight, Mail, MailOpen, X } from 'lucide-react';
-import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, setDoc, increment } from 'firebase/firestore';
+import { Heart, Camera, Image as ImageIcon, Loader2, Plus, Sparkles, Trash2, Clock, Calendar, Gift, ArrowLeftRight, Mail, MailOpen, X, CheckCircle2, Circle, CalendarPlus } from 'lucide-react';
+import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, setDoc, updateDoc, increment } from 'firebase/firestore';
 import { db } from './firebase';
 
 // --- CONFIGURACIÓN DE CLOUDINARY ---
@@ -19,11 +19,13 @@ const App = () => {
   const [timeTogether, setTimeTogether] = useState({ years: 0, months: 0, days: 0 });
   const [noPosition, setNoPosition] = useState({ x: 0, y: 0 });
   
-  // --- ESTADOS: RULETA ---
+  // --- ESTADOS: RULETA Y PROGRAMACIÓN DE CITAS ---
   const [opcionesRuleta, setOpcionesRuleta] = useState([]);
   const [nuevaOpcion, setNuevaOpcion] = useState('');
   const [ruletaGirando, setRuletaGirando] = useState(false);
   const [citaElegida, setCitaElegida] = useState('');
+  const [fechaProgramada, setFechaProgramada] = useState('');
+  const [guardandoCita, setGuardandoCita] = useState(false);
   const [gradosRuleta, setGradosRuleta] = useState(0);
   
   // --- ESTADOS: WISHLISTS ---
@@ -109,7 +111,7 @@ const App = () => {
     catch (error) { console.error(error); }
   };
   
-  // --- LÓGICA DE RULETA ---
+  // --- LÓGICA DE RULETA Y CITAS ---
   const agregarOpcionRuleta = async () => {
     if (nuevaOpcion.trim() !== '') {
       try { await addDoc(collection(db, 'ruleta_opciones'), { texto: nuevaOpcion.trim(), fecha: new Date().toISOString() }); setNuevaOpcion(''); } 
@@ -118,10 +120,11 @@ const App = () => {
   };
   const eliminarOpcion = async (id) => { try { await deleteDoc(doc(db, 'ruleta_opciones', id)); } catch (error) { console.error(error); } };
 
-  const girarRuleta = async () => {
+  const girarRuleta = () => {
     if (opcionesRuleta.length === 0) return;
     setRuletaGirando(true);
     setCitaElegida('');
+    setFechaProgramada('');
     
     const textosOpciones = opcionesRuleta.map(o => o.texto);
     const girosExtra = (Math.floor(Math.random() * 5) + 5) * 360; 
@@ -129,7 +132,7 @@ const App = () => {
     const rotacionTotal = gradosRuleta + girosExtra + gradosAleatorios;
     setGradosRuleta(rotacionTotal);
 
-    setTimeout(async () => {
+    setTimeout(() => {
       const anguloPorOpcion = 360 / textosOpciones.length;
       const gradosNormalizados = (360 - (rotacionTotal % 360)) % 360;
       const indiceGanador = Math.floor(gradosNormalizados / anguloPorOpcion);
@@ -138,10 +141,47 @@ const App = () => {
       setCitaElegida(seleccion);
       setRuletaGirando(false);
       confetti({ particleCount: 150, spread: 70, colors: ['#8B3A3A', '#D4AF37'] });
-
-      try { await addDoc(collection(db, 'historial_citas'), { titulo: seleccion, fecha: new Date().toISOString() }); } 
-      catch (error) { console.error(error); }
     }, 4000);
+  };
+
+  const guardarCitaProgramada = async () => {
+    if (!citaElegida) return;
+    setGuardandoCita(true);
+    try {
+      await addDoc(collection(db, 'historial_citas'), {
+        titulo: citaElegida,
+        fecha: new Date().toISOString(),
+        fechaCita: fechaProgramada || null,
+        realizada: false
+      });
+      setCitaElegida('');
+      setFechaProgramada('');
+    } catch (error) {
+      console.error("Error al agendar cita:", error);
+    } finally {
+      setGuardandoCita(false);
+    }
+  };
+
+  const toggleCitaRealizada = async (cita) => {
+    try {
+      await updateDoc(doc(db, 'historial_citas', cita.id), {
+        realizada: !cita.realizada
+      });
+      if (!cita.realizada) {
+        confetti({ particleCount: 60, spread: 50, origin: { y: 0.7 }, colors: ['#16a34a', '#D4AF37'] });
+      }
+    } catch (error) {
+      console.error("Error al actualizar estado de cita:", error);
+    }
+  };
+
+  const eliminarCitaHistorial = async (id) => {
+    try {
+      await deleteDoc(doc(db, 'historial_citas', id));
+    } catch (error) {
+      console.error("Error al eliminar cita:", error);
+    }
   };
 
   const coloresRuleta = ['#5C1D24', '#7A2E36', '#8B3A3A', '#A34848', '#B85C5C'];
@@ -204,10 +244,17 @@ const App = () => {
     } catch (error) { console.error(error); } finally { setSubiendo(false); if(fileInputRef.current) fileInputRef.current.value = ''; }
   };
 
+  // Formatear fecha YYYY-MM-DD sin desfase de zona horaria
+  const formatearFechaCita = (fechaStr) => {
+    if (!fechaStr) return 'Fecha por definir';
+    const [year, month, day] = fechaStr.split('-');
+    return `${day}/${month}/${year}`;
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#FAF7F2] via-[#F3ECE1] to-[#EAE0D0] flex flex-col items-center py-10 px-4 sm:px-6 font-sans text-stone-800 overflow-x-hidden relative">
       
-      {/* --- MODAL DE CARTA ABIERTA (CON SCROLL INTEGRADO) --- */}
+      {/* --- MODAL DE CARTA ABIERTA --- */}
       <AnimatePresence>
         {cartaAbierta && (
           <motion.div 
@@ -325,11 +372,11 @@ const App = () => {
           </div>
         </FadeInSection>
 
-        {/* SECCIÓN 3: RULETA Y OPCIONES */}
+        {/* SECCIÓN 3: RULETA, PROGRAMADOR E HISTORIAL CON CHECK */}
         <FadeInSection>
           <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xl p-6 sm:p-8 text-center border border-[#8B3A3A]/20">
             <h2 className="text-3xl font-extrabold text-[#5C1D24] mb-2 font-serif">Nuestra Ruleta</h2>
-            <p className="text-sm text-stone-500 mb-8">Agrega o elimina opciones en tiempo real.</p>
+            <p className="text-sm text-stone-500 mb-8">Agrega opciones, gira y agenda nuestra próxima cita.</p>
             
             <div className="relative w-64 h-64 mx-auto mb-10">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-20">
@@ -365,26 +412,105 @@ const App = () => {
               </div>
             </div>
 
-            {citaElegida && (
-              <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-gradient-to-r from-[#F3ECE1] to-[#EAE0D0] text-[#5C1D24] font-black text-2xl py-3 px-6 rounded-2xl mb-6 shadow-sm inline-block border border-[#8B3A3A]/30 font-serif">
-                🎉 ¡{citaElegida}!
-              </motion.div>
-            )}
+            {/* PANEL DE RESULTADO Y PROGRAMACIÓN DE FECHA */}
+            <AnimatePresence>
+              {citaElegida && (
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0 }} 
+                  animate={{ scale: 1, opacity: 1 }} 
+                  exit={{ scale: 0.9, opacity: 0 }}
+                  className="bg-gradient-to-br from-[#FAF7F2] to-[#F3ECE1] p-5 rounded-2xl mb-6 shadow-md border border-[#D4AF37]/50 text-center"
+                >
+                  <p className="text-xs uppercase tracking-widest text-[#8B3A3A] font-bold mb-1">Cita Seleccionada</p>
+                  <h3 className="text-[#5C1D24] font-black text-2xl font-serif mb-4">🎉 ¡{citaElegida}!</h3>
+                  
+                  <div className="bg-white p-3 rounded-xl border border-stone-200 mb-3 text-left">
+                    <label className="block text-xs font-bold text-stone-600 mb-1.5 flex items-center gap-1.5">
+                      <CalendarPlus className="w-4 h-4 text-[#8B3A3A]" /> Programar para el día (opcional):
+                    </label>
+                    <input 
+                      type="date" 
+                      value={fechaProgramada} 
+                      onChange={(e) => setFechaProgramada(e.target.value)}
+                      className="w-full text-sm text-stone-700 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 outline-none focus:border-[#8B3A3A]"
+                    />
+                  </div>
+
+                  <button 
+                    onClick={guardarCitaProgramada}
+                    disabled={guardandoCita}
+                    className="w-full bg-[#5C1D24] hover:bg-[#8B3A3A] text-white py-2.5 rounded-xl font-bold text-sm shadow transition-colors flex items-center justify-center gap-2"
+                  >
+                    {guardandoCita ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calendar className="w-4 h-4" />}
+                    {fechaProgramada ? 'Agendar en nuestro historial' : 'Guardar sin fecha definida'}
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <button onClick={girarRuleta} disabled={ruletaGirando || opcionesRuleta.length === 0} className="w-full bg-gradient-to-r from-[#8B3A3A] to-[#5C1D24] text-white py-4 rounded-2xl font-black tracking-wide text-lg shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50">
               {ruletaGirando ? 'GIRANDO...' : 'GIRAR RULETA'}
             </button>
 
+            {/* HISTORIAL DE CITAS CON CHECK DE REALIZADA */}
             <div className="mt-10 pt-6 border-t border-stone-200 text-left">
-              <h3 className="text-lg font-bold text-[#5C1D24] mb-3 flex items-center gap-2 font-serif"><Clock className="w-5 h-5 text-[#8B3A3A]" /> Historial de Citas</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-bold text-[#5C1D24] flex items-center gap-2 font-serif">
+                  <Clock className="w-5 h-5 text-[#8B3A3A]" /> Historial de Citas
+                </h3>
+                <span className="text-[11px] font-medium text-stone-400">
+                  {historialCitas.filter(c => c.realizada).length}/{historialCitas.length} realizadas
+                </span>
+              </div>
+
               {historialCitas.length === 0 ? (
                 <p className="text-xs text-stone-400 italic text-center py-2">Aún no hay citas sorteadas.</p>
               ) : (
-                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
                   {historialCitas.map((cita) => (
-                    <div key={cita.id} className="bg-[#FAF7F2] p-3 rounded-xl border border-stone-200 flex items-center justify-between text-xs">
-                      <span className="font-semibold text-stone-700">{cita.titulo}</span>
-                      <span className="text-stone-400 flex items-center gap-1"><Calendar className="w-3 h-3 text-[#8B3A3A]" />{new Date(cita.fecha).toLocaleDateString()}</span>
+                    <div 
+                      key={cita.id} 
+                      className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-2 ${
+                        cita.realizada 
+                          ? 'bg-emerald-50/60 border-emerald-200/80' 
+                          : 'bg-[#FAF7F2] border-stone-200'
+                      }`}
+                    >
+                      <button 
+                        onClick={() => toggleCitaRealizada(cita)}
+                        className="flex items-center gap-3 text-left flex-1 min-w-0 group"
+                        title={cita.realizada ? "Marcar como pendiente" : "Marcar como realizada"}
+                      >
+                        {cita.realizada ? (
+                          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                        ) : (
+                          <Circle className="w-5 h-5 text-stone-300 group-hover:text-[#8B3A3A] shrink-0 transition-colors" />
+                        )}
+                        <div className="truncate">
+                          <p className={`text-xs font-bold truncate ${cita.realizada ? 'line-through text-stone-400' : 'text-stone-800'}`}>
+                            {cita.titulo}
+                          </p>
+                          <div className="flex items-center gap-2 mt-0.5 text-[10px]">
+                            <span className={`flex items-center gap-1 font-medium ${cita.realizada ? 'text-emerald-600' : 'text-[#8B3A3A]'}`}>
+                              <Calendar className="w-3 h-3" />
+                              {cita.fechaCita ? `Para: ${formatearFechaCita(cita.fechaCita)}` : `Sorteada: ${new Date(cita.fecha).toLocaleDateString()}`}
+                            </span>
+                            {cita.realizada && (
+                              <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded font-bold">
+                                ¡Realizada!
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+
+                      <button 
+                        onClick={() => eliminarCitaHistorial(cita.id)} 
+                        className="text-stone-300 hover:text-rose-500 p-1 shrink-0 transition-colors"
+                        title="Eliminar cita"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   ))}
                 </div>
